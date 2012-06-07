@@ -341,6 +341,12 @@ typedef enum {
  */
 @property (assign, getter = isSquare) BOOL square;
 
+/** 
+ * Shows a cancel button that allows a task to be stopped before completion 
+ * Will call the delegate's hudDidCancel, and remove the HUD (as if hide: was sent), when the button is pressed
+ */
+@property (assign) BOOL allowsCancelation;
+
 @end
 
 
@@ -353,6 +359,11 @@ typedef enum {
  */
 - (void)hudWasHidden:(MBProgressHUD *)hud;
 
+@optional
+/** 
+ * A callback function that is called after the HUD get's cancelled. 
+ */
+- (void)hudDidCancel;
 @end
 
 

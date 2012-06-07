@@ -1,0 +1,469 @@
+diff --git a/CloseButton.png b/CloseButton.png
+new file mode 100644
+index 0000000..8607d03
+Binary files /dev/null and b/CloseButton.png differ
+diff --git a/MBProgressHUD.h b/MBProgressHUD.h
+index 539be61..b0d73c2 100644
+--- a/MBProgressHUD.h
++++ b/MBProgressHUD.h
+@@ -59,6 +59,11 @@ typedef enum {
+  */
+ - (void)hudWasHidden:(MBProgressHUD *)hud;
+ 
++@optional
++/** 
++ * A callback function that is called after the HUD get's cancelled. 
++ */
++- (void)hudDidCancel;
+ @end
+ 
+ /////////////////////////////////////////////////////////////////////////////////////////////
+@@ -138,6 +143,15 @@ typedef enum {
+ 	UIView *customView;
+ 	
+ 	CGAffineTransform rotationTransform;
++	
++	//public
++	BOOL dimBackground, drawStroke, allowsCancelation;
++	UIViewAnimationTransition animationTransition;
++	
++	//private
++	BOOL _firstLayout;
++	UIView *_backgroundDimmingView;
++	UIButton *_cancelButton;
+ }
+ 
+ /**
+@@ -289,6 +303,28 @@ typedef enum {
+ @property (assign) float progress;
+ 
+ /** 
++ * Makes the background dark when shown 
++ */
++@property (assign) BOOL dimBackground;
++
++/** 
++ * Draws a pretty white line around the HUD window
++ */
++@property (assign) BOOL drawStroke;
++
++/** 
++ * Shows a cancel button that allows a task to be stopped before completion 
++ * Will call the delegate's hudDidCancel, and remove the HUD (as if hide: was sent), when the button is pressed
++ */
++@property (assign) BOOL allowsCancelation;
++
++/** 
++ * The kind of UIViewAnimationTransition when the title/subtitle or custom view get updated, NOT used when the HUD appears or disappears
++ * Defaults to UIViewAnimationTransitionFlipFromRight but will only animate if show: is sent with YES
++ */
++@property (assign) UIViewAnimationTransition animationTransition;
++
++/** 
+  * Display the HUD. You need to make sure that the main thread completes its run loop soon after this method call so
+  * the user interface can be updated. Call this method when your task is already set-up to be executed in a new thread
+  * (e.g., when using something like NSOperation or calling an asynchronous call like NSUrlRequest).
+diff --git a/MBProgressHUD.m b/MBProgressHUD.m
+index 0a92f8c..551b3a4 100644
+--- a/MBProgressHUD.m
++++ b/MBProgressHUD.m
+@@ -30,6 +30,9 @@
+ @property (retain) NSTimer *minShowTimer;
+ @property (retain) NSDate *showStarted;
+ 
++@property (retain) UIView *_backgroundDimmingView;
++@property (retain) UIButton *_cancelButton;
++
+ @end
+ 
+ 
+@@ -63,6 +66,13 @@
+ 
+ @synthesize showStarted;
+ 
++@synthesize dimBackground, drawStroke, allowsCancelation;
++@synthesize animationTransition;
++
++//private
++@synthesize _backgroundDimmingView;
++@synthesize _cancelButton;
++
+ - (void)setMode:(MBProgressHUDMode)newMode {
+     // Dont change mode if it wasn't actually changed to prevent flickering
+     if (mode && (mode == newMode)) {
+@@ -87,6 +97,10 @@
+ }
+ 
+ - (void)setLabelText:(NSString *)newText {
++	
++	if([labelText isEqual:newText])
++		return;
++	
+ 	if ([NSThread isMainThread]) {
+ 		[self updateLabelText:newText];
+ 		[self setNeedsLayout];
+@@ -103,6 +117,10 @@
+ }
+ 
+ - (void)setDetailsLabelText:(NSString *)newText {
++	
++	if([detailsLabelText isEqual:newText])
++		return;
++	
+ 	if ([NSThread isMainThread]) {
+ 		[self updateDetailsLabelText:newText];
+ 		[self setNeedsLayout];
+@@ -184,8 +202,8 @@
+ #define MARGIN 20.0
+ #define PADDING 4.0
+ 
+-#define LABELFONTSIZE 16.0
+-#define LABELDETAILSFONTSIZE 12.0
++#define LABELFONTSIZE 22.0
++#define LABELDETAILSFONTSIZE 18.0
+ 
+ #define PI 3.14159265358979323846
+ 
+@@ -246,6 +264,7 @@
+     if ((self = [super initWithFrame:frame])) {
+         // Set default values for properties
+         self.animationType = MBProgressHUDAnimationFade;
++		self.animationTransition = UIViewAnimationTransitionFlipFromRight;
+         self.mode = MBProgressHUDModeIndeterminate;
+         self.labelText = nil;
+         self.detailsLabelText = nil;
+@@ -256,7 +275,7 @@
+         self.yOffset = 0.0;
+ 		self.graceTime = 0.0;
+ 		self.minShowTime = 0.0;
+-		self.removeFromSuperViewOnHide = NO;
++		self.removeFromSuperViewOnHide = YES;
+ 		
+ 		self.autoresizingMask = UIViewAutoresizingFlexibleTopMargin | UIViewAutoresizingFlexibleBottomMargin | UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
+ 		
+@@ -275,6 +294,15 @@
+ 		
+ 		taskInProgress = NO;
+ 		rotationTransform = CGAffineTransformIdentity;
++		_firstLayout = YES;
++		
++		//add the dimming background
++		self._backgroundDimmingView = [[[UIView alloc] initWithFrame:self.bounds] autorelease];
++        self._backgroundDimmingView.backgroundColor = [UIColor blackColor];
++        self._backgroundDimmingView.alpha = 0.0;
++		
++		self._backgroundDimmingView.userInteractionEnabled = NO;
++		self.userInteractionEnabled = NO;
+     }
+     return self;
+ }
+@@ -291,6 +319,12 @@
+ 	[minShowTimer release];
+ 	[showStarted release];
+ 	[customView release];
++	
++	[_backgroundDimmingView removeFromSuperview];
++	[_backgroundDimmingView release];
++	[_cancelButton removeFromSuperview];
++	[_cancelButton release];
++	
+     [super dealloc];
+ }
+ 
+@@ -298,6 +332,14 @@
+ #pragma mark Layout
+ 
+ - (void)layoutSubviews {
++	
++	if(useAnimation && !_firstLayout && self.animationTransition != UIViewAnimationTransitionNone)
++	{
++		[UIView beginAnimations:nil context:NULL];
++		[UIView setAnimationDuration:0.30];
++		[UIView setAnimationTransition:self.animationTransition forView:self cache:NO];	
++	}
++	
+     CGRect frame = self.bounds;
+ 	
+     // Compute HUD dimensions based on indicator size (add margin to HUD border)
+@@ -310,6 +352,8 @@
+     indFrame.origin.y = floor((frame.size.height - indFrame.size.height) / 2) + self.yOffset;
+     indicator.frame = indFrame;
+ 	
++	CGRect lFrame = CGRectZero;
++	
+     // Add label if label text was set
+     if (nil != self.labelText) {
+         // Get size of label text
+@@ -335,68 +379,134 @@
+         label.text = self.labelText;
+ 		
+         // Update HUD size
+-        if (self.width < (lWidth + 2 * MARGIN)) {
++        if (self.width < (lWidth + 2 * MARGIN))
+             self.width = lWidth + 2 * MARGIN;
+-        }
+-        self.height = self.height + lHeight + PADDING;
++
++		self.height = self.height + lHeight + PADDING;
+ 		
+         // Move indicator to make room for the label
+         indFrame.origin.y -= (floor(lHeight / 2 + PADDING / 2));
+         indicator.frame = indFrame;
+ 		
+         // Set the label position and dimensions
+-        CGRect lFrame = CGRectMake(floor((frame.size.width - lWidth) / 2) + xOffset,
++        lFrame = CGRectMake(floor((frame.size.width - lWidth) / 2) + xOffset,
+                                    floor(indFrame.origin.y + indFrame.size.height + PADDING),
+                                    lWidth, lHeight);
+         label.frame = lFrame;
+ 		
+         [self addSubview:label];
++    }
++	else
++	{
++		[label removeFromSuperview];
++	}
++	
++	// Add details label delatils text was set
++	if (nil != self.detailsLabelText) {
++		// Get size of label text
++		CGSize dims = [self.detailsLabelText sizeWithFont:self.detailsLabelFont];
+ 		
+-        // Add details label delatils text was set
+-        if (nil != self.detailsLabelText) {
+-            // Get size of label text
+-            dims = [self.detailsLabelText sizeWithFont:self.detailsLabelFont];
+-			
+-            // Compute label dimensions based on font metrics if size is larger than max then clip the label width
+-            lHeight = dims.height;
+-            if (dims.width <= (frame.size.width - 2 * MARGIN)) {
+-                lWidth = dims.width;
+-            }
+-            else {
+-                lWidth = frame.size.width - 4 * MARGIN;
+-            }
+-			
+-            // Set label properties
+-            detailsLabel.font = self.detailsLabelFont;
+-            detailsLabel.adjustsFontSizeToFitWidth = NO;
+-            detailsLabel.textAlignment = UITextAlignmentCenter;
+-            detailsLabel.opaque = NO;
+-            detailsLabel.backgroundColor = [UIColor clearColor];
+-            detailsLabel.textColor = [UIColor whiteColor];
+-            detailsLabel.text = self.detailsLabelText;
+-			
+-            // Update HUD size
+-            if (self.width < lWidth) {
+-                self.width = lWidth + 2 * MARGIN;
+-            }
+-            self.height = self.height + lHeight + PADDING;
+-			
+-            // Move indicator to make room for the new label
+-            indFrame.origin.y -= (floor(lHeight / 2 + PADDING / 2));
+-            indicator.frame = indFrame;
+-			
+-            // Move first label to make room for the new label
+-            lFrame.origin.y -= (floor(lHeight / 2 + PADDING / 2));
+-            label.frame = lFrame;
+-			
+-            // Set label position and dimensions
+-            CGRect lFrameD = CGRectMake(floor((frame.size.width - lWidth) / 2) + xOffset,
+-                                        lFrame.origin.y + lFrame.size.height + PADDING, lWidth, lHeight);
+-            detailsLabel.frame = lFrameD;
+-			
+-            [self addSubview:detailsLabel];
+-        }
++		// Compute label dimensions based on font metrics if size is larger than max then clip the label width
++		float lHeight = dims.height;
++        float lWidth;
++		if (dims.width <= (frame.size.width - 2 * MARGIN)) {
++			lWidth = dims.width;
++		}
++		else {
++			lWidth = frame.size.width - 4 * MARGIN;
++		}
++		
++		// Set label properties
++		detailsLabel.font = self.detailsLabelFont;
++		detailsLabel.adjustsFontSizeToFitWidth = NO;
++		detailsLabel.textAlignment = UITextAlignmentCenter;
++		detailsLabel.opaque = NO;
++		detailsLabel.backgroundColor = [UIColor clearColor];
++		detailsLabel.textColor = [UIColor whiteColor];
++		detailsLabel.text = self.detailsLabelText;
++		
++		// Update HUD size
++		if (self.width < lWidth + 2 * MARGIN)
++			self.width = lWidth + 2 * MARGIN;
++
++		self.height = self.height + lHeight + PADDING;
++		
++		// Move indicator to make room for the new label
++		indFrame.origin.y -= (floor(lHeight / 2 + PADDING / 2));
++		indicator.frame = indFrame;
++		
++		// Move first label to make room for the new label
++		lFrame.origin.y -= (floor(lHeight / 2 + PADDING / 2));
++		label.frame = lFrame;
++		
++		// Set label position and dimensions
++		CGRect lFrameD = CGRectMake(floor((frame.size.width - lWidth) / 2) + xOffset,
++									lFrame.origin.y + lFrame.size.height + PADDING, lWidth, lHeight);
++		detailsLabel.frame = lFrameD;
++		
++		[self addSubview:detailsLabel];
++	}
++	else
++	{
++		[detailsLabel removeFromSuperview];
++	}
++	
++	if(self.allowsCancelation)
++	{
++		if(!self._cancelButton)
++		{
++			self._cancelButton = [UIButton buttonWithType:UIButtonTypeCustom];
++			[self._cancelButton setImage:[UIImage imageNamed:@"CloseButton.png"] forState:UIControlStateNormal];
++			[self._cancelButton addTarget:self action:@selector(cancel) forControlEvents:UIControlEventTouchUpInside];
++		}
++		
++		self._cancelButton.frame = CGRectMake(((self.bounds.size.width - self.width) / 2) + self.xOffset - 12,
++										 ((self.bounds.size.height - self.height) / 2) + self.yOffset - 12, 29, 29);
++		
++		if(![self._cancelButton superview])
++            [self addSubview:self._cancelButton];
++		
++	}
++	else
++	{
++		if(self._cancelButton)
++		{
++			[self._cancelButton removeFromSuperview];
++			self._cancelButton = nil;
++		}
++	}
++	
++	if(useAnimation && !_firstLayout && self.animationTransition != UIViewAnimationTransitionNone)
++	{
++		[UIView commitAnimations];
++	}
++	
++	_firstLayout = NO;
++}
++
++#pragma mark -
++#pragma mark Background Adding
++- (void)didMoveToSuperview
++{
++	if(!self._backgroundDimmingView.superview)
++		[self.superview insertSubview:self._backgroundDimmingView belowSubview:self];		
++}
++
++- (void)removeFromSuperview
++{
++	[self._backgroundDimmingView removeFromSuperview];
++	[super removeFromSuperview];
++}
++
++- (void)cancel
++{
++	if(delegate != nil && [delegate conformsToProtocol:@protocol(MBProgressHUDDelegate)]) {
++		if([delegate respondsToSelector:@selector(hudDidCancel)]) {
++			[delegate performSelector:@selector(hudDidCancel)];
++		}
+     }
++	
++	[self hideUsingAnimation:useAnimation];
+ }
+ 
+ #pragma mark -
+@@ -489,13 +599,23 @@
+ 	
+     // If delegate was set make the callback
+     self.alpha = 0.0;
+-    
++	self._backgroundDimmingView.alpha = 0.0;
++	
++	self._backgroundDimmingView.userInteractionEnabled = NO;
++	self.userInteractionEnabled = NO;
++
+     if(delegate != nil && [delegate conformsToProtocol:@protocol(MBProgressHUDDelegate)]) {
+ 		if([delegate respondsToSelector:@selector(hudWasHidden:)]) {
+ 			[delegate performSelector:@selector(hudWasHidden:) withObject:self];
+ 		}
+     }
+ 	
++	if(self._backgroundDimmingView)
++    {
++        [self._backgroundDimmingView removeFromSuperview];
++        self._backgroundDimmingView = nil;
++    }
++	
+ 	if (removeFromSuperViewOnHide) {
+ 		[self removeFromSuperview];
+ 	}
+@@ -530,10 +650,20 @@
+         if (animationType == MBProgressHUDAnimationZoom) {
+             self.transform = rotationTransform;
+         }
++		
++		self._backgroundDimmingView.alpha = (self.dimBackground ? 0.35:0.0);
++		
+         [UIView commitAnimations];
++		
++		self._backgroundDimmingView.userInteractionEnabled = YES;
++		self.userInteractionEnabled = YES;
+     }
+     else {
+         self.alpha = 1.0;
++		self._backgroundDimmingView.alpha = (self.dimBackground ? 0.35:0.0);
++		
++		self._backgroundDimmingView.userInteractionEnabled = YES;
++		self.userInteractionEnabled = YES;
+     }
+ }
+ 
+@@ -550,10 +680,12 @@
+             self.transform = CGAffineTransformConcat(rotationTransform, CGAffineTransformMakeScale(0.5, 0.5));
+         }
+         self.alpha = 0.02;
++		self._backgroundDimmingView.alpha = 0.0;
+         [UIView commitAnimations];
+     }
+     else {
+         self.alpha = 0.0;
++		self._backgroundDimmingView.alpha = 0.0;
+         [self done];
+     }
+ }
+@@ -582,6 +714,21 @@
+     CGContextAddArc(context, CGRectGetMinX(rect) + radius, CGRectGetMinY(rect) + radius, radius, M_PI, 3 * M_PI / 2, 0);
+     CGContextClosePath(context);
+     CGContextFillPath(context);
++	
++	//now draw the border
++	if(self.drawStroke)
++	{
++		CGContextBeginPath(context);
++		CGContextSetGrayStrokeColor(context, 1.0, self.opacity);
++		CGContextSetLineWidth(context, 4.0);
++		CGContextMoveToPoint(context, CGRectGetMinX(rect) + radius, CGRectGetMinY(rect));
++		CGContextAddArc(context, CGRectGetMaxX(rect) - radius, CGRectGetMinY(rect) + radius, radius, 3 * M_PI / 2, 0, 0);
++		CGContextAddArc(context, CGRectGetMaxX(rect) - radius, CGRectGetMaxY(rect) - radius, radius, 0, M_PI / 2, 0);
++		CGContextAddArc(context, CGRectGetMinX(rect) + radius, CGRectGetMaxY(rect) - radius, radius, M_PI / 2, M_PI, 0);
++		CGContextAddArc(context, CGRectGetMinX(rect) + radius, CGRectGetMinY(rect) + radius, radius, M_PI, 3 * M_PI / 2, 0);
++		CGContextClosePath(context);
++		CGContextStrokePath(context);
++	}
+ }
+ 
+ #pragma mark -
+@@ -599,7 +746,7 @@
+ }
+ 
+ - (void)setTransformForCurrentOrientation:(BOOL)animated {
+-	UIDeviceOrientation orientation = [UIApplication sharedApplication].statusBarOrientation;
++	UIInterfaceOrientation orientation = [UIApplication sharedApplication].statusBarOrientation;
+ 	NSInteger degrees = 0;
+ 	
+ 	if (UIInterfaceOrientationIsLandscape(orientation)) {

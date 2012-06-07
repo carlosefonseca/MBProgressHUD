@@ -49,7 +49,7 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 @property (MB_STRONG) NSTimer *minShowTimer;
 @property (MB_STRONG) NSDate *showStarted;
 @property (assign) CGSize size;
-
+@property (MB_STRONG) UIButton *_cancelButton;
 @end
 
 
@@ -62,6 +62,7 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 	UILabel *detailsLabel;
 	BOOL isFinished;
 	CGAffineTransform rotationTransform;
+    
 }
 
 #pragma mark - Properties
@@ -91,6 +92,8 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 @synthesize detailsLabelText;
 @synthesize progress;
 @synthesize size;
+@synthesize allowsCancelation;
+@synthesize _cancelButton;
 
 #pragma mark - Class methods
 
@@ -180,6 +183,7 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 		
 		[self setupLabels];
 		[self updateIndicators];
+        [self setupCancelButton];
 		[self registerForKVO];
 		[self registerForNotifications];
 	}
@@ -428,6 +432,31 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 	}
 }
 
+- (void)setupCancelButton
+{
+    if(self.allowsCancelation)
+	{
+		if(!self._cancelButton)
+		{
+			self._cancelButton = [UIButton buttonWithType:UIButtonTypeCustom];
+			[self._cancelButton setImage:[UIImage imageNamed:@"CloseButton.png"] forState:UIControlStateNormal];
+			[self._cancelButton addTarget:self action:@selector(cancel) forControlEvents:UIControlEventTouchUpInside];
+		}
+
+		if(![self._cancelButton superview])
+            [self addSubview:self._cancelButton];
+		
+	}
+	else
+	{
+		if(self._cancelButton)
+		{
+			[self._cancelButton removeFromSuperview];
+			self._cancelButton = nil;
+		}
+	}
+}
+
 #pragma mark - Layout
 
 - (void)layoutSubviews {
@@ -472,6 +501,7 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 	// Position elements
 	CGFloat yPos = roundf(((bounds.size.height - totalSize.height) / 2)) + margin + yOffset;
 	CGFloat xPos = xOffset;
+
 	indicatorF.origin.y = yPos;
 	indicatorF.origin.x = roundf((bounds.size.width - indicatorF.size.width) / 2) + xPos;
 	indicator.frame = indicatorF;
@@ -514,6 +544,12 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 	}
 	
 	self.size = totalSize;
+    
+    [self setupCancelButton];
+    
+    self._cancelButton.frame = CGRectMake(roundf((bounds.size.width - totalSize.width)/2)-13,
+                                          roundf(((bounds.size.height - totalSize.height) / 2))-13, 29, 29);
+
 }
 
 #pragma mark BG Drawing
@@ -574,7 +610,7 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 
 - (NSArray *)observableKeypaths {
 	return [NSArray arrayWithObjects:@"mode", @"customView", @"labelText", @"labelFont", 
-			@"detailsLabelText", @"detailsLabelFont", @"progress", nil];
+			@"detailsLabelText", @"detailsLabelFont", @"progress", @"allowsCancelation", nil];
 }
 
 - (void)observeValueForKeyPath:(NSString *)keyPath ofObject:(id)object change:(NSDictionary *)change context:(void *)context {
@@ -601,8 +637,8 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 			[(id)indicator setProgress:progress];
 		}
 		return;
-	}
-	[self setNeedsLayout];
+    }
+    [self setNeedsLayout];
 	[self setNeedsDisplay];
 }
 
@@ -658,6 +694,16 @@ static const CGFloat kDetailsLabelFontSize = 12.f;
 		[UIView commitAnimations];
 	}
 }
+
+- (void)cancel
+{
+	if(delegate != nil && [delegate conformsToProtocol:@protocol(MBProgressHUDDelegate)]) {
+		if([delegate respondsToSelector:@selector(hudDidCancel)]) {
+			[delegate performSelector:@selector(hudDidCancel)];
+		}
+    }
+}
+
 
 @end
 

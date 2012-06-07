@@ -26,6 +26,7 @@
 - (IBAction)showUsingBlocks:(id)sender;
 - (IBAction)showOnWindow:(id)sender;
 - (IBAction)showURL:(id)sender;
+- (IBAction)showWithCancel:(id)sender;
 
 - (void)myTask;
 - (void)myProgressTask;

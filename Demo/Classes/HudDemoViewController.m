@@ -202,6 +202,19 @@
 	[hud hide:YES afterDelay:3];
 }
 
+- (IBAction)showWithCancel:(id)sender {
+	
+	HUD = [[MBProgressHUD alloc] initWithView:self.navigationController.view];
+	[self.navigationController.view addSubview:HUD];
+	
+	HUD.delegate = self;
+	HUD.labelText = @"Loading";
+	HUD.allowsCancelation = YES;
+	
+	[HUD showWhileExecuting:@selector(myTask) onTarget:self withObject:nil animated:YES];
+}
+
+
 #pragma mark -
 #pragma mark Execution code
 
@@ -278,5 +291,14 @@
 	[HUD release];
 	HUD = nil;
 }
+
+- (void)hudDidCancel {
+	[[[[UIAlertView alloc] initWithTitle:nil message:@"Canceled!" delegate:nil cancelButtonTitle:@"Ok" otherButtonTitles:nil] autorelease] show];
+	// Remove HUD from screen when the HUD was hidded
+	[HUD removeFromSuperview];
+	[HUD release];
+	HUD = nil;
+}
+
 
 @end

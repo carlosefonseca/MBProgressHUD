@@ -15,6 +15,7 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		076FCEFB157B867C004E2E87 /* CloseButton.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = CloseButton.png; sourceTree = "<group>"; };
 		D286A7491518C70F00E13FB8 /* libMBProgressHUD.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libMBProgressHUD.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		D286A74C1518C70F00E13FB8 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 		D286A7511518C70F00E13FB8 /* MBProgressHUD.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = MBProgressHUD.h; sourceTree = SOURCE_ROOT; };
@@ -40,6 +41,7 @@
 		D286A73E1518C70E00E13FB8 = {
 			isa = PBXGroup;
 			children = (
+				076FCEFB157B867C004E2E87 /* CloseButton.png */,
 				D286A74E1518C70F00E13FB8 /* MBProgressHUD */,
 				D286A74B1518C70F00E13FB8 /* Frameworks */,
 				D286A74A1518C70F00E13FB8 /* Products */,
